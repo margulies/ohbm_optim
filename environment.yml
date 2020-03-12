@@ -1,16 +1,7 @@
 name: ohbm_optimize
 channels:
-  - conda-forge
   - http://conda.anaconda.org/gurobi
 dependencies:
-  - ipyvolume
-  - bqplot
-  - scipy
-  - ipympl
-  - voila=0.1.21
-  - ipympl
-  - xleaflet=0.8.0
-  - xeus-cling=0.6.0
   - numpy
   - pandas
   - gurobi
