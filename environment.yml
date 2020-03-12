@@ -14,6 +14,5 @@ dependencies:
   - numpy
   - pandas
   - gurobi
-  - itertools
   - matplotlib
   
