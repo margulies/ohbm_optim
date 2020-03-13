@@ -3,9 +3,12 @@ channels:
   - conda-forge
   - http://conda.anaconda.org/gurobi
 dependencies:
+  - python>=3.6
   - numpy
   - pandas
   - gurobi
   - matplotlib
-  - ortools
+  - pip
+  - pip:
+    - ortools
   
