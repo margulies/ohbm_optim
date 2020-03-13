@@ -15,6 +15,7 @@ save_outputs  = True   # save symposia schedule and (if plotted) similatity mati
 
 inputs = pd.read_excel('/network/lustre/iss01/home/daniel.margulies/code/ohbm_optim/input.xlsx',sheet_name=["symposia","sessions","rooms","symposia_constraints","symposia_similarity"])
 
+names         = inputs['symposia'].Name
 panel_titles  = list(inputs['symposia'].Name)
 timeslotsList = list(inputs['sessions'].Name)
 symp_per_slot = list(inputs['sessions'].Capacity)
@@ -42,16 +43,14 @@ nr            = len(room_names)              # number of rooms
 ##################################################################################################
 # add constraints for specific symposia that are already scheduled, eg:
 def scheduleSymposia(a,b):
-    for j in np.setdiff1d(range(nt),b):
-        for r in range(nr):
-            m.Add(x[(a,j,r)] == 0) # lock symposium a in list to time slot b
+    for t in np.setdiff1d(range(nt),b):
+        m.Add(x[(a,t)] == 0) # lock symposium a in list to time slot b
     print('Lock: \"' + panel_titles[a] + '\" to ' + timeslotsList[b])
 
 # prioritize symposia earlier in conference
 def prioritizeScheduling(a):
     for c in range(int(nt/2)+1,nt): # put symposium in first half of conference 
-        for r in range(nr):
-            m.Add(x[(a,c,r)] == 0)
+        m.Add(x[(a,c)] == 0)
     print('Prioritize: \"' + panel_titles[a] + '\"')
     
 # # constrain specific symposia to not be in same time slot, eg:
@@ -67,8 +66,8 @@ def symposiaOverlap(a,b):
     a,b = np.sort([a,b])
     m.Add(sum(y[(a,b,t)] for t in range(nt)) == 1)
     for t1,t2 in list(itertools.combinations(range(nt),2)):
-        m.Add(sum([sum(x[(a,t1,r)] for r in range(nr)),sum(x[(b,t2,r)] for r in range(nr))]) <= 1)
-        m.Add(sum([sum(x[(a,t2,r)] for r in range(nr)),sum(x[(b,t1,r)] for r in range(nr))]) <= 1)
+        m.Add(sum([x[(a,t1)],x[(b,t2)]]) <= 1)
+        m.Add(sum([x[(a,t2)],x[(b,t1)]]) <= 1)
     print('Schedule together: \"' + panel_titles[a] + '\" and \"' + panel_titles[b] + '\"')
 
 # assign rooms
@@ -101,10 +100,10 @@ for t in range(nt):
 print('===== constraints: =====')
 #for i in set_room.dropna("").index.values:
  #   assignRooms(i,set_room.dropna("")[i])
-#for i in set_session.dropna("").index.values:
-#    scheduleSymposia(i,inputs['sessions'][inputs['sessions'].Name.str.match(set_session.dropna("")[i])].index.values[0])
-#for i in set_priority.dropna("").index.values:
-#    prioritizeScheduling(i)
+for i in set_session.dropna("").index.values:
+    scheduleSymposia(i,inputs['sessions'][inputs['sessions'].Name.str.match(set_session.dropna("")[i])].index.values[0])
+for i in set_priority.dropna("").index.values:
+    prioritizeScheduling(i)
 
 i_pairs_list = list(itertools.combinations(range(ns),2))
 y = {}
@@ -117,12 +116,12 @@ if len(np.where(set_room.dropna("") == 'large')[0]) > 1:
     for s1,s2 in room_large_conflicts:
         avoidSymposiaOverlap(s1,s2)
 
-#for i in avoid_overlap.dropna("").index.values:
-#    avoidSymposiaOverlap(inputs['symposia'][names.str.match(symposia1[i].replace('(','\(').replace(')','\)'))].index.values[0], 
-#                         inputs['symposia'][names.str.match(symposia2[i].replace('(','\(').replace(')','\)'))].index.values[0])
-#for i in ensure_overlap.dropna("").index.values:
-#    symposiaOverlap(inputs['symposia'][names.str.match(symposia1[i].replace('(','\(').replace(')','\)'))].index.values[0], 
-#                    inputs['symposia'][names.str.match(symposia2[i].replace('(','\(').replace(')','\)'))].index.values[0])
+for i in avoid_overlap.dropna("").index.values:
+    avoidSymposiaOverlap(inputs['symposia'][names.str.match(symposia1[i].replace('(','\(').replace(')','\)'))].index.values[0], 
+                         inputs['symposia'][names.str.match(symposia2[i].replace('(','\(').replace(')','\)'))].index.values[0])
+for i in ensure_overlap.dropna("").index.values:
+    symposiaOverlap(inputs['symposia'][names.str.match(symposia1[i].replace('(','\(').replace(')','\)'))].index.values[0], 
+                    inputs['symposia'][names.str.match(symposia2[i].replace('(','\(').replace(')','\)'))].index.values[0])
 
 for i,ip in i_pairs_list:
     for t in range(nt):
@@ -136,13 +135,16 @@ text_format.Parse(str(m), new_model.Proto())
 
 solver = cp_model.CpSolver()
 solver.parameters.num_search_workers  = multiprocessing.cpu_count()
-# solver.parameters.max_time_in_seconds = 100.0
+solver.parameters.max_time_in_seconds = 30.0
 
 solution_printer = cp_model.ObjectiveSolutionPrinter()
 status = solver.SolveWithSolutionCallback(new_model, solution_printer)
 # status = solver.Solve(new_model)
 print(solver.StatusName(status))
 print(solver.ObjectiveValue())
+
+total_combos = sum([len(list(itertools.combinations(range(i),2))) for i in [4,3,4,4,4,3,4]])
+print("average value per symposium: %f" % solver.ObjectiveValue()/total_combos)
 
 # ##################################################################################################
 # # Results:
