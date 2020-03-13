@@ -144,7 +144,7 @@ print(solver.StatusName(status))
 print(solver.ObjectiveValue())
 
 total_combos = sum([len(list(itertools.combinations(range(i),2))) for i in [4,3,4,4,4,3,4]])
-print("average value per symposium: %f" % solver.ObjectiveValue()/total_combos)
+print("average value per symposium: %f" % np.float(solver.ObjectiveValue())/total_combos)
 
 # ##################################################################################################
 # # Results:
