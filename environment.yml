@@ -6,4 +6,10 @@ dependencies:
   - pandas
   - gurobi
   - matplotlib
+  - pip
+- pip:
+  - ortools
+  - gspread 
+  - oauth2client
+  - xlrd
   
