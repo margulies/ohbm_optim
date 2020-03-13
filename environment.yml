@@ -1,5 +1,6 @@
 name: ohbm_optimize
 channels:
+  - conda-forge
   - http://conda.anaconda.org/gurobi
 dependencies:
   - numpy
