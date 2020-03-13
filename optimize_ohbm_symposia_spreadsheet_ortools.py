@@ -5,19 +5,28 @@ import numpy as np
 import pandas as pd
 from ortools.sat.python import cp_model
 import itertools
+import multiprocessing
+from google.protobuf import text_format
 
 verbose       = False  # set to True to print extensive output info
-verbose_optim = True  # set to True to print running optimization
+verbose_optim = True   # set to True to print running optimization
 verbose_plot  = True   # display similarity matrix
 save_outputs  = True   # save symposia schedule and (if plotted) similatity matix plot
 
-inputs = pd.read_excel('input.xlsx',sheet_name=["symposia","sessions","rooms","symposia_constraints","symposia_similarity"])
+inputs = pd.read_excel('/network/lustre/iss01/home/daniel.margulies/code/ohbm_optim/input_clean.xlsx',sheet_name=["symposia","sessions","rooms","symposia_constraints","symposia_similarity"])
 
 panel_titles  = list(inputs['symposia'].Name)
 timeslotsList = list(inputs['sessions'].Name)
 symp_per_slot = list(inputs['sessions'].Capacity)
 room_names    = list(inputs['rooms'].Name)
 rooms         = list(inputs['rooms'].Capacity)
+set_priority   = inputs['symposia'].Set_Priority.replace(to_replace="",value=np.nan)
+set_session    = inputs['symposia'].Set_Session.replace(to_replace="",value=np.nan)
+set_room       = inputs['symposia'].Set_Room.replace(to_replace="",value=np.nan)
+avoid_overlap  = inputs['symposia_constraints'].Avoid_overlap.replace(to_replace="",value=np.nan)
+ensure_overlap = inputs['symposia_constraints'].Ensure_overlap.replace(to_replace="",value=np.nan)
+symposia1      = inputs['symposia_constraints'].Symposia_1.replace(to_replace="",value=np.nan)
+symposia2      = inputs['symposia_constraints'].Symposia_2.replace(to_replace="",value=np.nan)
 sim_mat_o = 1. - np.asarray(inputs['symposia_similarity'].set_index('Unnamed: 0')) # dissimilarity matrix
 sim_mat = np.zeros((len(sim_mat_o),len(sim_mat_o)),dtype=np.int)
 for n,i in enumerate(sim_mat_o * 10000. ):
@@ -28,21 +37,9 @@ ns            = len(panel_titles)             # number of symposia
 nt            = len(timeslotsList)            # number of time slots
 nr            = len(room_names)              # number of rooms
 
-# # print IDs for symposia titles and time slots
-# if verbose:     
-#     print('Rooms:')
-#     for i,n in enumerate(room_names):
-#         print('%s capacity: %i' % (n,rooms[i]))
-#     print('')    
-#     print('Time slots:')
-#     for i,n in enumerate(timeslotsList):
-#         print('%s' % n)
-#     print('')    
-#     print('Symposia titles:')
-#     for i,n in enumerate(panel_titles):
-#         print('%s' % n)
-#     print('')
-        
+##################################################################################################
+# Constraint functions:
+##################################################################################################
 # add constraints for specific symposia that are already scheduled, eg:
 def scheduleSymposia(a,b):
     for j in np.setdiff1d(range(nt),b):
@@ -97,24 +94,20 @@ for s in range(ns):
     for t in range(nt):
         for r in range(nr):
             x[(s,t,r)] = m.NewBoolVar('schedule_s%it%ir%i' % (s,t,r))
-
 for t in range(nt):
     for r in range(nr):
         m.Add(sum(x[(s,t,r)] for s in range(ns)) <= 1)
-
 for s in range(ns):
     m.Add(sum(x[(s,t,r)] for r in range(nr) for t in range(nt)) == 1)
-
 for t in range(nt):
     m.Add(sum(x[(s,t,r)] for s in range(ns) for r in range(nr)) == symp_per_slot[t])
 
-# print('')
-# print('===== constraints: =====')
-for i in inputs['symposia'].Set_Room.dropna("").index.values:
-    assignRooms(i,inputs['symposia'].Set_Room.dropna("")[i])
-for i in inputs['symposia'].Set_Session.dropna("").index.values:
-    scheduleSymposia(i,inputs['sessions'][inputs['sessions'].Name.str.match(inputs['symposia'].Set_Session.dropna("")[i])].index.values[0])
-for i in inputs['symposia'].Set_Priority.dropna("").index.values:
+print('===== constraints: =====')
+for i in set_room.dropna("").index.values:
+    assignRooms(i,set_room.dropna("")[i])
+for i in set_session.dropna("").index.values:
+    scheduleSymposia(i,inputs['sessions'][inputs['sessions'].Name.str.match(set_session.dropna("")[i])].index.values[0])
+for i in set_priority.dropna("").index.values:
     prioritizeScheduling(i)
 
 i_pairs_list = list(itertools.combinations(range(ns),2))
@@ -123,74 +116,91 @@ for i,ip in i_pairs_list:
     for t in range(nt):
         y[(i,ip,t)] = m.NewBoolVar('overlap_i%iip%it%i' % (i,ip,t))
 
-for i in inputs['symposia_constraints'].Avoid_overlap.dropna("").index.values:
-    avoidSymposiaOverlap(inputs['symposia'][inputs['symposia'].Name.str.match(inputs['symposia_constraints'].Symposia_1[i].replace('(','\(').replace(')','\)'))].index.values[0], 
-                         inputs['symposia'][inputs['symposia'].Name.str.match(inputs['symposia_constraints'].Symposia_2[i].replace('(','\(').replace(')','\)'))].index.values[0])
-for i in inputs['symposia_constraints'].Ensure_overlap.dropna("").index.values:
-    symposiaOverlap(inputs['symposia'][inputs['symposia'].Name.str.match(inputs['symposia_constraints'].Symposia_1[i].replace('(','\(').replace(')','\)'))].index.values[0], 
-                    inputs['symposia'][inputs['symposia'].Name.str.match(inputs['symposia_constraints'].Symposia_2[i].replace('(','\(').replace(')','\)'))].index.values[0])
+for i in avoid_overlap.dropna("").index.values:
+    avoidSymposiaOverlap(inputs['symposia'][names.str.match(symposia1[i].replace('(','\(').replace(')','\)'))].index.values[0], 
+                         inputs['symposia'][names.str.match(symposia2[i].replace('(','\(').replace(')','\)'))].index.values[0])
+for i in ensure_overlap.dropna("").index.values:
+    symposiaOverlap(inputs['symposia'][names.str.match(symposia1[i].replace('(','\(').replace(')','\)'))].index.values[0], 
+                    inputs['symposia'][names.str.match(symposia2[i].replace('(','\(').replace(')','\)'))].index.values[0])
 
 for i,ip in i_pairs_list:
-    for j in range(nt):
+    for t in range(nt):
         m.Add(sum(x[i,t,r] for r in range(nr)) + sum(x[ip,t,r] for r in range(nr)) - y[i,ip,t] <= 1)
         m.Add(2*y[i,ip,t] - sum(x[i,t,r] for r in range(nr)) - sum(x[ip,t,r] for r in range(nr))  <= 0)
 
 m.Maximize(sum(sim_mat[i][ip] * y[(i,ip,t)] for i,ip in i_pairs_list for t in range(nt)))
+
+new_model = cp_model.CpModel()
+text_format.Parse(str(m), new_model.Proto())
+
 solver = cp_model.CpSolver()
-solver.parameters.linearization_level = 0
-solver.Solve(m)
+solver.parameters.num_search_workers  = multiprocessing.cpu_count()
+solver.parameters.max_time_in_seconds = 100.0
+
+solution_printer = cp_model.ObjectiveSolutionPrinter()
+status = solver.SolveWithSolutionCallback(new_model, solution_printer)
+# status = solver.Solve(new_model)
+print(solver.StatusName(status))
+print(solver.ObjectiveValue())
 
 # ##################################################################################################
 # # Results:
 # ##################################################################################################
 
-newOrder = []
-print()
-file1 = open("schedule.txt","w")
-for t in range(nt):
-    print('%s' % timeslotsList[t])
-    file1.write('%s\n' % timeslotsList[t])
-    for s in range(ns):        
-        for r in range(nr):
-            if solver.Value(x[(s,t,r)]) == 1:
-                print('%s: %s' % (room_names[r],panel_titles[s]))
-                newOrder.append(s)
-                #try:
-                file1.write('%s: %s\n' % (room_names[r],panel_titles[s].encode('utf8').decode("utf-8"))) 
-                #except:
-                #    file1.write('%s: %s\n' % (room_names[r],panel_titles[s].encode('utf8')))                
+if status == cp_model.FEASIBLE:
+    if status == cp_model.OPTIMAL:
+        print("optimal solution!")
+    else
+        print("feasible solution")
+
+    # Statistics
     print()
-    file1.write('\n')
-file1.close()
+    print('===== statistics: =====')
+    print('  - Stats           : %i' % solver.ObjectiveValue())
+    print('  - wall time       : %f s' % solver.WallTime())
+    print(m.ModelStats())
+    print()
 
-# Statistics.
-print()
-print('Statistics')
-print('  - Stats           : %i' % solver.ObjectiveValue())
-print('  - wall time       : %f s' % solver.WallTime())
-   
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
+    # Schedule
+    newOrder = []
+    print()
+    print("===== Schedule: =====")
+    file1 = open("schedule.txt","w")
+    for t in range(nt):
+        print('%s' % timeslotsList[t])
+        file1.write('%s\n' % timeslotsList[t])
+        for r in range(nr):
+            for s in range(ns):        
+                if solver.Value(x[(s,t,r)]) == 1:
+                    print('%s: %s' % (room_names[r],panel_titles[s]))
+                    newOrder.append(s)
+                    file1.write('%s: %s\n' % (room_names[r],panel_titles[s].encode('utf8').decode("utf-8")))               
+        print()
+        file1.write('\n')
+    file1.close()
 
-panel_titles_reordered = [panel_titles[i] for i in newOrder]
+if verbose_plot:
+    import matplotlib as mpl
+    mpl.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
 
-fig = plt.figure(figsize=(12,12))
-plt.imshow(sim_mat[:,newOrder][newOrder].squeeze(), interpolation='nearest', cmap=cm.jet_r, vmin=.95*10000.)
-ax = plt.gca()
-ax.set_yticks(np.arange(0, len(panel_titles_reordered), 1))
-ax.set_xticks(np.arange(0, len(panel_titles_reordered), 1))
-ax.set_yticklabels(panel_titles_reordered)
-ax.set_xticklabels(panel_titles_reordered)
-plt.xticks(rotation=90)
+    panel_titles_reordered = [panel_titles[i] for i in newOrder]
 
-for i in np.cumsum(np.asarray(symp_per_slot))-0.5:
-    plt.axvline(x=i, color='white', linewidth=6)
-    plt.axhline(y=i, color='white', linewidth=6)
+    fig = plt.figure(figsize=(12,12))
+    plt.imshow(sim_mat[:,newOrder][newOrder].squeeze(), interpolation='nearest', cmap=cm.jet_r, vmin=.95*10000.)
+    ax = plt.gca()
+    ax.set_yticks(np.arange(0, len(panel_titles_reordered), 1))
+    ax.set_xticks(np.arange(0, len(panel_titles_reordered), 1))
+    ax.set_yticklabels(panel_titles_reordered)
+    ax.set_xticklabels(panel_titles_reordered)
+    plt.xticks(rotation=90)
 
-if save_outputs:
-    plt.savefig('symposia_similarity.png')
-
-plt.show()
-
-# squares along diagonal reflext similarity of symposia sessions:
+    for i in np.cumsum(np.asarray(symp_per_slot))-0.5:
+        plt.axvline(x=i, color='white', linewidth=6)
+        plt.axhline(y=i, color='white', linewidth=6)
+    
+    if save_outputs:
+        plt.savefig('/network/lustre/iss01/home/daniel.margulies/code/ohbm_optim/symposia_similarity.png')
+    plt.close()
 
